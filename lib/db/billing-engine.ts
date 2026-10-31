@@ -303,19 +303,23 @@ export function recordPayment(params: {
     throw new Error("Payment amount must be greater than 0");
   }
 
-  const inv = db.prepare(`SELECT * FROM invoices WHERE id = ?`).get(params.invoiceId) as any;
+  let inv = db.prepare(`SELECT * FROM invoices WHERE id = ?`).get(params.invoiceId) as any;
+  if (!inv) {
+    inv = db.prepare(`SELECT * FROM invoices WHERE number = ?`).get(params.invoiceId) as any;
+  }
   if (!inv) {
     throw new Error(`Invoice not found: ${params.invoiceId}`);
   }
 
   const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const actualInvoiceId = inv.id;
 
   db.prepare(
     `INSERT INTO payments (id, invoice_id, method, amount, payment_date, note, recorded_by)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(
     paymentId,
-    params.invoiceId,
+    actualInvoiceId,
     params.method,
     params.amount,
     paymentDate,
@@ -331,7 +335,7 @@ export function recordPayment(params: {
     `UPDATE invoices 
      SET amount_paid = ?, status = ?, updated_at = datetime('now')
      WHERE id = ?`
-  ).run(newAmountPaid, newStatus, params.invoiceId);
+  ).run(newAmountPaid, newStatus, actualInvoiceId);
 
   return {
     paymentId,

@@ -6,3 +6,5 @@ dist/
 .DS_Store
 *.log
 .env*.local
+data/platform.db-shm
+data/platform.db-wal
