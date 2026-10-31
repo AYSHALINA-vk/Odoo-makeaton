@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isAdmin, isStaff } from "@/lib/auth/rbac";
+import { syncRecordToSupabase } from "@/lib/supabase/sync";
 
 export async function GET() {
   const db = getDatabase();
@@ -45,8 +46,20 @@ export async function POST(request: Request) {
       notes ? notes.trim() : null
     );
 
+    // Sync to Supabase
+    await syncRecordToSupabase("products", {
+      id: productId,
+      name: name.trim(),
+      type,
+      sales_price: Number(sales_price) || 0,
+      cost_price: Number(cost_price) || 0,
+      notes: notes ? notes.trim() : null,
+      is_active: true,
+    });
+
     // Insert variants if provided
     if (Array.isArray(variants)) {
+      const variantRows: any[] = [];
       for (const v of variants) {
         if (v.attribute && v.value) {
           const variantId = `var_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -54,7 +67,17 @@ export async function POST(request: Request) {
             `INSERT INTO product_variants (id, product_id, attribute, value, extra_price)
              VALUES (?, ?, ?, ?, ?)`
           ).run(variantId, productId, v.attribute.trim(), v.value.trim(), Number(v.extra_price) || 0);
+          variantRows.push({
+            id: variantId,
+            product_id: productId,
+            attribute: v.attribute.trim(),
+            value: v.value.trim(),
+            extra_price: Number(v.extra_price) || 0,
+          });
         }
+      }
+      if (variantRows.length > 0) {
+        await syncRecordToSupabase("product_variants", variantRows);
       }
     }
 

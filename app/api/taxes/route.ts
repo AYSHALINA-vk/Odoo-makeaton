@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isAdmin } from "@/lib/auth/rbac";
+import { syncRecordToSupabase } from "@/lib/supabase/sync";
 
 export async function GET() {
   const db = getDatabase();
@@ -24,10 +25,20 @@ export async function POST(request: Request) {
     const db = getDatabase();
     const taxId = `tax_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
+    const taxRow = {
+      id: taxId,
+      name: name.trim(),
+      rate: Number(rate),
+      applies_to: applies_to || "all",
+      is_active: true,
+    };
+
     db.prepare(
       `INSERT INTO taxes (id, name, rate, applies_to, is_active)
        VALUES (?, ?, ?, ?, 1)`
-    ).run(taxId, name.trim(), Number(rate), applies_to || "all");
+    ).run(taxRow.id, taxRow.name, taxRow.rate, taxRow.applies_to);
+
+    await syncRecordToSupabase("taxes", taxRow);
 
     // Audit log
     db.prepare(

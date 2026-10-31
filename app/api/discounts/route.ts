@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isAdmin, isStaff } from "@/lib/auth/rbac";
+import { syncRecordToSupabase } from "@/lib/supabase/sync";
 
 export async function GET() {
   const currentUser = await getCurrentUser();
@@ -54,24 +55,42 @@ export async function POST(request: Request) {
     const db = getDatabase();
     const discountId = `disc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
+    const discountRow = {
+      id: discountId,
+      name: name.trim(),
+      type,
+      value: Number(value),
+      min_purchase: min_purchase ? Number(min_purchase) : null,
+      min_quantity: min_quantity ? Number(min_quantity) : null,
+      start_date: start_date || null,
+      end_date: end_date || null,
+      usage_limit: usage_limit ? Number(usage_limit) : null,
+      times_used: 0,
+      scope: scope || "subscription",
+      product_id: scope === "product" ? product_id || null : null,
+      is_active: true,
+    };
+
     db.prepare(
       `INSERT INTO discounts (
         id, name, type, value, min_purchase, min_quantity, start_date, end_date,
         usage_limit, times_used, scope, product_id, is_active
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1)`
     ).run(
-      discountId,
-      name.trim(),
-      type,
-      Number(value),
-      min_purchase ? Number(min_purchase) : null,
-      min_quantity ? Number(min_quantity) : null,
-      start_date || null,
-      end_date || null,
-      usage_limit ? Number(usage_limit) : null,
-      scope || "subscription",
-      scope === "product" ? product_id || null : null
+      discountRow.id,
+      discountRow.name,
+      discountRow.type,
+      discountRow.value,
+      discountRow.min_purchase,
+      discountRow.min_quantity,
+      discountRow.start_date,
+      discountRow.end_date,
+      discountRow.usage_limit,
+      discountRow.scope,
+      discountRow.product_id
     );
+
+    await syncRecordToSupabase("discounts", discountRow);
 
     // Audit log
     db.prepare(

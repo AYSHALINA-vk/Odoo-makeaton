@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isCustomer, isStaff } from "@/lib/auth/rbac";
+import { syncRecordToSupabase } from "@/lib/supabase/sync";
 
 export async function GET() {
   const currentUser = await getCurrentUser();
@@ -47,18 +48,31 @@ export async function POST(request: Request) {
     const db = getDatabase();
     const custId = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
+    const customerRow = {
+      id: custId,
+      name: name.trim(),
+      company: company ? company.trim() : null,
+      email: email.trim(),
+      phone: phone ? phone.trim() : null,
+      billing_address: billing_address ? billing_address.trim() : null,
+      tax_id: tax_id ? tax_id.trim() : null,
+    };
+
     db.prepare(
       `INSERT INTO customers (id, name, company, email, phone, billing_address, tax_id)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(
-      custId,
-      name.trim(),
-      company ? company.trim() : null,
-      email.trim(),
-      phone ? phone.trim() : null,
-      billing_address ? billing_address.trim() : null,
-      tax_id ? tax_id.trim() : null
+      customerRow.id,
+      customerRow.name,
+      customerRow.company,
+      customerRow.email,
+      customerRow.phone,
+      customerRow.billing_address,
+      customerRow.tax_id
     );
+
+    // Sync to live Supabase
+    await syncRecordToSupabase("customers", customerRow);
 
     return NextResponse.json({ success: true, customerId: custId });
   } catch (error: any) {

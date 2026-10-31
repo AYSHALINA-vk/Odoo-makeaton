@@ -3,6 +3,7 @@ import { getDatabase } from "@/lib/db/database";
 import { recordPayment } from "@/lib/db/billing-engine";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isCustomer, isStaff } from "@/lib/auth/rbac";
+import { syncRecordToSupabase } from "@/lib/supabase/sync";
 
 export async function GET(request: Request) {
   const currentUser = await getCurrentUser();
@@ -60,8 +61,19 @@ export async function POST(request: Request) {
       recordedBy: currentUser.name || "Staff",
     });
 
-    // Audit log
     const db = getDatabase();
+
+    // Sync payment and updated invoice to Supabase
+    try {
+      const paymentRow = db.prepare(`SELECT * FROM payments WHERE id = ?`).get(result.paymentId);
+      const invoiceRow = db.prepare(`SELECT * FROM invoices WHERE id = ?`).get(invoiceId);
+      if (paymentRow) await syncRecordToSupabase("payments", paymentRow);
+      if (invoiceRow) await syncRecordToSupabase("invoices", invoiceRow);
+    } catch (err: any) {
+      console.warn("Could not sync payment to Supabase:", err.message);
+    }
+
+    // Audit log
     db.prepare(
       `INSERT INTO audit_log (actor_id, actor_email, entity, entity_id, action, after_state)
        VALUES (?, ?, 'payments', ?, 'PAYMENT_RECORDED', ?)`

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isCustomer, isStaff } from "@/lib/auth/rbac";
+import { syncRecordToSupabase } from "@/lib/supabase/sync";
 
 export async function GET(request: Request) {
   const currentUser = await getCurrentUser();
@@ -118,25 +119,40 @@ export async function POST(request: Request) {
     const initialStatus = status || "draft";
     const termsId = payment_terms_id || "pt_15";
 
+    const subRow = {
+      id: subId,
+      number: subNumber,
+      customer_id,
+      plan_id,
+      start_date,
+      expiry_date,
+      payment_terms_id: termsId,
+      status: initialStatus,
+      next_billing_date: start_date,
+    };
+
     db.prepare(
       `INSERT INTO subscriptions (
         id, number, customer_id, plan_id, start_date, expiry_date, payment_terms_id,
         status, next_billing_date
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
-      subId,
-      subNumber,
-      customer_id,
-      plan_id,
-      start_date,
-      expiry_date,
-      termsId,
-      initialStatus,
-      start_date // next billing date defaults to start date
+      subRow.id,
+      subRow.number,
+      subRow.customer_id,
+      subRow.plan_id,
+      subRow.start_date,
+      subRow.expiry_date,
+      subRow.payment_terms_id,
+      subRow.status,
+      subRow.next_billing_date
     );
+
+    await syncRecordToSupabase("subscriptions", subRow);
 
     // Insert lines
     if (Array.isArray(lines)) {
+      const lineRows: any[] = [];
       for (const line of lines) {
         if (line.product_id) {
           const lineId = `sl_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -160,7 +176,22 @@ export async function POST(request: Request) {
             line.discount_id || null,
             amount
           );
+
+          lineRows.push({
+            id: lineId,
+            subscription_id: subId,
+            product_id: line.product_id,
+            variant_id: line.variant_id || null,
+            quantity: qty,
+            unit_price: unitPrice,
+            tax_id: line.tax_id || null,
+            discount_id: line.discount_id || null,
+            amount,
+          });
         }
+      }
+      if (lineRows.length > 0) {
+        await syncRecordToSupabase("subscription_lines", lineRows);
       }
     }
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isStaff } from "@/lib/auth/rbac";
+import { syncRecordToSupabase } from "@/lib/supabase/sync";
 
 export async function POST(
   request: Request,
@@ -64,6 +65,13 @@ export async function POST(
       newStatus,
       id
     );
+
+    // Sync updated invoice to Supabase
+    await syncRecordToSupabase("invoices", {
+      id,
+      status: newStatus,
+      updated_at: new Date().toISOString(),
+    });
 
     // Audit log
     db.prepare(

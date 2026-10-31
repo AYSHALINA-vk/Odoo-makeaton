@@ -3,6 +3,7 @@ import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isCustomer } from "@/lib/auth/rbac";
 import { format, addDays, addWeeks, addMonths, addYears, parseISO } from "date-fns";
+import { syncRecordToSupabase } from "@/lib/supabase/sync";
 
 export async function POST(
   request: Request,
@@ -117,6 +118,14 @@ export async function POST(
        SET status = ?, expiry_date = ?, updated_at = datetime('now')
        WHERE id = ?`
     ).run(newStatus, newExpiryDate, id);
+
+    // Sync to Supabase
+    await syncRecordToSupabase("subscriptions", {
+      id,
+      status: newStatus,
+      expiry_date: newExpiryDate,
+      updated_at: new Date().toISOString(),
+    });
 
     // Audit log
     db.prepare(

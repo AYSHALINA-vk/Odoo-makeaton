@@ -3,6 +3,7 @@ import { getDatabase } from "@/lib/db/database";
 import { hashPassword } from "@/lib/db/seed";
 import { validatePassword } from "@/lib/auth/password-policy";
 import { setSessionCookie } from "@/lib/auth/session";
+import { syncRecordToSupabase } from "@/lib/supabase/sync";
 
 export async function POST(request: Request) {
   try {
@@ -50,18 +51,31 @@ export async function POST(request: Request) {
     ).run(userId, cleanEmail, hashPassword(password), fullName.trim());
 
     // 4. Create linked customer row
+    const customerRow = {
+      id: custId,
+      user_id: null, // NULL in Supabase unless linked to an auth.users UUID
+      name: fullName.trim(),
+      company: company ? company.trim() : null,
+      email: cleanEmail,
+      phone: phone ? phone.trim() : null,
+      billing_address: billingAddress ? billingAddress.trim() : null,
+    };
+
     db.prepare(
       `INSERT INTO customers (id, user_id, name, company, email, phone, billing_address)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(
-      custId,
+      customerRow.id,
       userId,
-      fullName.trim(),
-      company ? company.trim() : null,
-      cleanEmail,
-      phone ? phone.trim() : null,
-      billingAddress ? billingAddress.trim() : null
+      customerRow.name,
+      customerRow.company,
+      customerRow.email,
+      customerRow.phone,
+      customerRow.billing_address
     );
+
+    // Sync to Supabase
+    await syncRecordToSupabase("customers", customerRow);
 
     // Audit log
     db.prepare(
