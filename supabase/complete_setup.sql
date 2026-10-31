@@ -531,3 +531,172 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO subscription_lines (id, subscription_id, product_id, variant_id, quantity, unit_price, tax_id, discount_id, amount) VALUES
   ('sl_001_1', 'sub_001', 'prod_core', 'var_core_odoo', 2, 1760.00, 'tax_vat20', 'disc_volume', 3590.40)
 ON CONFLICT (id) DO NOTHING;
+
+
+-- ============================================================================
+-- PART 5: ROW LEVEL SECURITY (RLS) & ACCESS CONTROL POLICIES
+-- ============================================================================
+
+-- 1. Enable RLS on all tables
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE product_variants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_terms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE taxes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE discounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE quotation_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE quotation_template_lines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscription_lines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_lines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE billing_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+
+-- 2. Security Definier Helper Functions for fast RLS checks
+CREATE OR REPLACE FUNCTION is_admin()
+RETURNS BOOLEAN AS $$
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM profiles
+        WHERE id = auth.uid() AND role = 'admin'
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION is_staff()
+RETURNS BOOLEAN AS $$
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM profiles
+        WHERE id = auth.uid() AND (role = 'admin' OR role = 'staff')
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 3. Profiles Policies
+DROP POLICY IF EXISTS "Public profiles read own" ON profiles;
+CREATE POLICY "Public profiles read own" ON profiles FOR SELECT USING (id = auth.uid() OR is_staff());
+
+DROP POLICY IF EXISTS "Admin manages profiles" ON profiles;
+CREATE POLICY "Admin manages profiles" ON profiles FOR ALL USING (is_admin());
+
+-- 4. Customers Policies
+DROP POLICY IF EXISTS "Staff read/write customers" ON customers;
+CREATE POLICY "Staff read/write customers" ON customers FOR ALL USING (is_staff());
+
+DROP POLICY IF EXISTS "Customers read own profile" ON customers;
+CREATE POLICY "Customers read own profile" ON customers FOR SELECT USING (user_id = auth.uid());
+
+-- 5. Products & Variants Policies (Public/Anon can view active for landing page pricing)
+DROP POLICY IF EXISTS "Public read active products" ON products;
+CREATE POLICY "Public read active products" ON products FOR SELECT USING (is_active = TRUE OR is_staff());
+
+DROP POLICY IF EXISTS "Admin manages products" ON products;
+CREATE POLICY "Admin manages products" ON products FOR ALL USING (is_admin());
+
+DROP POLICY IF EXISTS "Public read variants" ON product_variants;
+CREATE POLICY "Public read variants" ON product_variants FOR SELECT USING (TRUE);
+
+DROP POLICY IF EXISTS "Admin manages variants" ON product_variants;
+CREATE POLICY "Admin manages variants" ON product_variants FOR ALL USING (is_admin());
+
+-- 6. Plans Policies (Public can view active for landing page and signup)
+DROP POLICY IF EXISTS "Public read active plans" ON plans;
+CREATE POLICY "Public read active plans" ON plans FOR SELECT USING (is_active = TRUE OR is_staff());
+
+DROP POLICY IF EXISTS "Admin manages plans" ON plans;
+CREATE POLICY "Admin manages plans" ON plans FOR ALL USING (is_admin());
+
+-- 7. Payment Terms Policies
+DROP POLICY IF EXISTS "Anyone read active payment terms" ON payment_terms;
+CREATE POLICY "Anyone read active payment terms" ON payment_terms FOR SELECT USING (is_active = TRUE OR is_staff());
+
+DROP POLICY IF EXISTS "Admin manages payment terms" ON payment_terms;
+CREATE POLICY "Admin manages payment terms" ON payment_terms FOR ALL USING (is_admin());
+
+-- 8. Taxes Policies
+DROP POLICY IF EXISTS "Anyone read active taxes" ON taxes;
+CREATE POLICY "Anyone read active taxes" ON taxes FOR SELECT USING (is_active = TRUE OR is_staff());
+
+DROP POLICY IF EXISTS "Admin manages taxes" ON taxes;
+CREATE POLICY "Admin manages taxes" ON taxes FOR ALL USING (is_admin());
+
+-- 9. Discounts Policies (Admin only creates/edits; staff can read for quoting)
+DROP POLICY IF EXISTS "Staff read discounts" ON discounts;
+CREATE POLICY "Staff read discounts" ON discounts FOR SELECT USING (is_staff());
+
+DROP POLICY IF EXISTS "Admin manages discounts" ON discounts;
+CREATE POLICY "Admin manages discounts" ON discounts FOR ALL USING (is_admin());
+
+-- 10. Quotation Templates Policies
+DROP POLICY IF EXISTS "Staff manage quotation templates" ON quotation_templates;
+CREATE POLICY "Staff manage quotation templates" ON quotation_templates FOR ALL USING (is_staff());
+
+DROP POLICY IF EXISTS "Staff manage quotation template lines" ON quotation_template_lines;
+CREATE POLICY "Staff manage quotation template lines" ON quotation_template_lines FOR ALL USING (is_staff());
+
+-- 11. Subscriptions & Lines Policies (Isolated per customer)
+DROP POLICY IF EXISTS "Staff manage subscriptions" ON subscriptions;
+CREATE POLICY "Staff manage subscriptions" ON subscriptions FOR ALL USING (is_staff());
+
+DROP POLICY IF EXISTS "Customers read own subscriptions" ON subscriptions;
+CREATE POLICY "Customers read own subscriptions" ON subscriptions FOR SELECT USING (
+    customer_id IN (SELECT id FROM customers WHERE user_id = auth.uid())
+);
+
+DROP POLICY IF EXISTS "Staff manage subscription lines" ON subscription_lines;
+CREATE POLICY "Staff manage subscription lines" ON subscription_lines FOR ALL USING (is_staff());
+
+DROP POLICY IF EXISTS "Customers read own subscription lines" ON subscription_lines;
+CREATE POLICY "Customers read own subscription lines" ON subscription_lines FOR SELECT USING (
+    subscription_id IN (
+        SELECT id FROM subscriptions WHERE customer_id IN (
+            SELECT id FROM customers WHERE user_id = auth.uid()
+        )
+    )
+);
+
+-- 12. Invoices & Lines Policies (Isolated per customer)
+DROP POLICY IF EXISTS "Staff manage invoices" ON invoices;
+CREATE POLICY "Staff manage invoices" ON invoices FOR ALL USING (is_staff());
+
+DROP POLICY IF EXISTS "Customers read own invoices" ON invoices;
+CREATE POLICY "Customers read own invoices" ON invoices FOR SELECT USING (
+    customer_id IN (SELECT id FROM customers WHERE user_id = auth.uid())
+);
+
+DROP POLICY IF EXISTS "Staff manage invoice lines" ON invoice_lines;
+CREATE POLICY "Staff manage invoice lines" ON invoice_lines FOR ALL USING (is_staff());
+
+DROP POLICY IF EXISTS "Customers read own invoice lines" ON invoice_lines;
+CREATE POLICY "Customers read own invoice lines" ON invoice_lines FOR SELECT USING (
+    invoice_id IN (
+        SELECT id FROM invoices WHERE customer_id IN (
+            SELECT id FROM customers WHERE user_id = auth.uid()
+        )
+    )
+);
+
+-- 13. Payments Policies
+DROP POLICY IF EXISTS "Staff manage payments" ON payments;
+CREATE POLICY "Staff manage payments" ON payments FOR ALL USING (is_staff());
+
+DROP POLICY IF EXISTS "Customers read own payments" ON payments;
+CREATE POLICY "Customers read own payments" ON payments FOR SELECT USING (
+    invoice_id IN (
+        SELECT id FROM invoices WHERE customer_id IN (
+            SELECT id FROM customers WHERE user_id = auth.uid()
+        )
+    )
+);
+
+-- 14. Billing Runs & Audit Logs Policies
+DROP POLICY IF EXISTS "Staff manage billing runs" ON billing_runs;
+CREATE POLICY "Staff manage billing runs" ON billing_runs FOR ALL USING (is_staff());
+
+DROP POLICY IF EXISTS "Staff read audit logs" ON audit_log;
+CREATE POLICY "Staff read audit logs" ON audit_log FOR SELECT USING (is_staff());
