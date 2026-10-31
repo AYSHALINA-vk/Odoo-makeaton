@@ -4,12 +4,32 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { isAdmin } from "@/lib/auth/rbac";
 import { hashPassword } from "@/lib/db/seed";
 import { validatePassword } from "@/lib/auth/password-policy";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { isSupabaseActive } from "@/lib/supabase/data";
+import { syncRecordToSupabase } from "@/lib/supabase/sync";
 
 // Admin only: list staff and create new staff members
 export async function GET() {
   const currentUser = await getCurrentUser();
   if (!currentUser || !isAdmin(currentUser.role)) {
     return NextResponse.json({ error: "Unauthorized: Admin access required" }, { status: 403 });
+  }
+
+  if (isSupabaseActive()) {
+    try {
+      const supabase = createAdminClient();
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, email, full_name, role, created_at")
+        .in("role", ["admin", "staff"])
+        .order("created_at", { ascending: false });
+
+      if (!error && data) {
+        return NextResponse.json({ staff: data });
+      }
+    } catch (err: any) {
+      console.warn("[Staff] Supabase fetch fallback:", err.message);
+    }
   }
 
   const db = getDatabase();
@@ -76,6 +96,23 @@ export async function POST(request: Request) {
       `INSERT INTO profiles (id, email, password_hash, full_name, role)
        VALUES (?, ?, ?, ?, ?)`
     ).run(newStaffId, cleanEmail, hashPassword(password), fullName.trim(), targetRole);
+
+    // Sync to Supabase profiles
+    if (isSupabaseActive()) {
+      try {
+        const supabase = createAdminClient();
+        await supabase.from("profiles").upsert(
+          {
+            email: cleanEmail,
+            full_name: fullName.trim(),
+            role: targetRole,
+          },
+          { onConflict: "email" }
+        );
+      } catch (err: any) {
+        console.warn("[Staff Sync] Failed to sync new staff profile to Supabase:", err.message);
+      }
+    }
 
     // Audit log
     db.prepare(
