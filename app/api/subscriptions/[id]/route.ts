@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isCustomer } from "@/lib/auth/rbac";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { isSupabaseActive } from "@/lib/supabase/data";
 
 export async function GET(
   request: Request,
@@ -11,6 +13,73 @@ export async function GET(
   const currentUser = await getCurrentUser();
   if (!currentUser) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (isSupabaseActive()) {
+    try {
+      const supabase = createAdminClient();
+      const { data: sub, error: sErr } = await supabase
+        .from("subscriptions")
+        .select(`
+          *,
+          customer:customers(*),
+          plan:plans(*),
+          payment_terms:payment_terms(*),
+          lines:subscription_lines(
+            *,
+            product:products(*),
+            variant:product_variants(*),
+            tax:taxes(*),
+            discount:discounts(*)
+          ),
+          invoices:invoices(*)
+        `)
+        .eq("id", id)
+        .single();
+
+      if (!sErr && sub) {
+        if (isCustomer(currentUser.role) && sub.customer?.user_id !== currentUser.id) {
+          return NextResponse.json({ error: "Forbidden: Access to this subscription is restricted" }, { status: 403 });
+        }
+
+        const formatted = {
+          ...sub,
+          customer_name: sub.customer?.name,
+          customer_company: sub.customer?.company,
+          customer_email: sub.customer?.email,
+          customer_phone: sub.customer?.phone,
+          billing_address: sub.customer?.billing_address,
+          plan_name: sub.plan?.name,
+          billing_period: sub.plan?.billing_period,
+          plan_price: sub.plan?.price,
+          auto_close: sub.plan?.auto_close,
+          closable: sub.plan?.closable,
+          pausable: sub.plan?.pausable,
+          renewable: sub.plan?.renewable,
+          min_quantity: sub.plan?.min_quantity,
+          payment_terms_name: sub.payment_terms?.name,
+          days_due: sub.payment_terms?.days_due,
+          lines: (sub.lines || []).map((l: any) => ({
+            ...l,
+            product_name: l.product?.name,
+            product_type: l.product?.type,
+            variant_name: l.variant?.value,
+            variant_attribute: l.variant?.attribute,
+            variant_extra: l.variant?.extra_price,
+            tax_name: l.tax?.name,
+            tax_rate: l.tax?.rate,
+            discount_name: l.discount?.name,
+            discount_type: l.discount?.type,
+            discount_value: l.discount?.value,
+          })),
+          invoices: sub.invoices || [],
+        };
+
+        return NextResponse.json({ subscription: formatted });
+      }
+    } catch (err: any) {
+      console.warn("[Subscription Detail] Supabase fetch fallback:", err.message);
+    }
   }
 
   const db = getDatabase();

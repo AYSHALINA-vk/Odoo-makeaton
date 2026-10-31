@@ -3,6 +3,7 @@ import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isAdmin, isStaff } from "@/lib/auth/rbac";
 import { syncRecordToSupabase } from "@/lib/supabase/sync";
+import { fetchDiscounts } from "@/lib/supabase/data";
 
 export async function GET() {
   const currentUser = await getCurrentUser();
@@ -10,16 +11,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
 
-  const db = getDatabase();
-  const discounts = db
-    .prepare(
-      `SELECT d.*, p.name as product_name 
-       FROM discounts d
-       LEFT JOIN products p ON d.product_id = p.id
-       ORDER BY d.created_at DESC`
-    )
-    .all();
-
+  const discounts = await fetchDiscounts();
   return NextResponse.json({ discounts });
 }
 

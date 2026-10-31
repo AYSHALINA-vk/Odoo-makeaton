@@ -3,19 +3,11 @@ import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isAdmin, isStaff } from "@/lib/auth/rbac";
 import { syncRecordToSupabase } from "@/lib/supabase/sync";
+import { fetchProducts } from "@/lib/supabase/data";
 
 export async function GET() {
-  const db = getDatabase();
-  const products = db.prepare(`SELECT * FROM products ORDER BY name ASC`).all() as any[];
-  const variants = db.prepare(`SELECT * FROM product_variants ORDER BY attribute, value`).all() as any[];
-
-  // Group variants under each product
-  const productsWithVariants = products.map((p) => ({
-    ...p,
-    variants: variants.filter((v) => v.product_id === p.id),
-  }));
-
-  return NextResponse.json({ products: productsWithVariants });
+  const products = await fetchProducts();
+  return NextResponse.json({ products });
 }
 
 export async function POST(request: Request) {

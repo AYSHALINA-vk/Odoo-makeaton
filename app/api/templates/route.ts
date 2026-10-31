@@ -3,8 +3,47 @@ import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isStaff } from "@/lib/auth/rbac";
 import { syncRecordToSupabase } from "@/lib/supabase/sync";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { isSupabaseActive } from "@/lib/supabase/data";
 
 export async function GET() {
+  if (isSupabaseActive()) {
+    try {
+      const supabase = createAdminClient();
+      const { data: templates, error: tErr } = await supabase
+        .from("quotation_templates")
+        .select(`
+          *,
+          plan:plans(name, price, billing_period),
+          lines:quotation_template_lines(
+            *,
+            product:products(name, sales_price),
+            variant:product_variants(value, extra_price)
+          )
+        `)
+        .order("name", { ascending: true });
+
+      if (!tErr && templates) {
+        const formatted = templates.map((t: any) => ({
+          ...t,
+          plan_name: t.plan?.name,
+          plan_price: t.plan?.price,
+          billing_period: t.plan?.billing_period,
+          lines: (t.lines || []).map((l: any) => ({
+            ...l,
+            product_name: l.product?.name,
+            sales_price: l.product?.sales_price,
+            variant_name: l.variant?.value,
+            extra_price: l.variant?.extra_price,
+          })),
+        }));
+        return NextResponse.json({ templates: formatted });
+      }
+    } catch (err: any) {
+      console.warn("[Templates] Supabase fetch fallback:", err.message);
+    }
+  }
+
   const db = getDatabase();
   const templates = db
     .prepare(

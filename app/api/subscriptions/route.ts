@@ -3,6 +3,7 @@ import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isCustomer, isStaff } from "@/lib/auth/rbac";
 import { syncRecordToSupabase } from "@/lib/supabase/sync";
+import { fetchSubscriptions } from "@/lib/supabase/data";
 
 export async function GET(request: Request) {
   const currentUser = await getCurrentUser();
@@ -11,43 +12,15 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
-  const statusFilter = searchParams.get("status");
-  const customerFilter = searchParams.get("customerId");
+  const statusFilter = searchParams.get("status") || undefined;
+  const customerFilter = searchParams.get("customerId") || undefined;
 
-  const db = getDatabase();
+  const subscriptions = await fetchSubscriptions({
+    userId: isCustomer(currentUser.role) ? currentUser.id : undefined,
+    customerId: customerFilter,
+    status: statusFilter,
+  });
 
-  let query = `
-    SELECT s.*, 
-           c.name as customer_name, c.company as customer_company, c.email as customer_email,
-           p.name as plan_name, p.billing_period, p.price as plan_price,
-           p.auto_close, p.closable, p.pausable, p.renewable,
-           pt.name as payment_terms_name, pt.days_due,
-           (SELECT COALESCE(sum(amount), 0) FROM subscription_lines WHERE subscription_id = s.id) as sub_total
-    FROM subscriptions s
-    JOIN customers c ON s.customer_id = c.id
-    JOIN plans p ON s.plan_id = p.id
-    JOIN payment_terms pt ON s.payment_terms_id = pt.id
-    WHERE 1=1
-  `;
-  const params: any[] = [];
-
-  // Customer isolation (FR-PORTAL-1: customers can only view their own subscriptions!)
-  if (isCustomer(currentUser.role)) {
-    query += ` AND c.user_id = ?`;
-    params.push(currentUser.id);
-  } else if (customerFilter) {
-    query += ` AND s.customer_id = ?`;
-    params.push(customerFilter);
-  }
-
-  if (statusFilter && statusFilter !== "all") {
-    query += ` AND s.status = ?`;
-    params.push(statusFilter);
-  }
-
-  query += ` ORDER BY s.created_at DESC`;
-
-  const subscriptions = db.prepare(query).all(...params);
   return NextResponse.json({ subscriptions });
 }
 

@@ -3,10 +3,10 @@ import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isAdmin } from "@/lib/auth/rbac";
 import { syncRecordToSupabase } from "@/lib/supabase/sync";
+import { fetchPlans } from "@/lib/supabase/data";
 
 export async function GET() {
-  const db = getDatabase();
-  const plans = db.prepare(`SELECT * FROM plans ORDER BY price ASC`).all();
+  const plans = await fetchPlans();
   return NextResponse.json({ plans });
 }
 

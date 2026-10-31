@@ -3,6 +3,8 @@ import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isCustomer } from "@/lib/auth/rbac";
 import { format } from "date-fns";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { isSupabaseActive } from "@/lib/supabase/data";
 
 export async function GET(
   request: Request,
@@ -14,8 +16,55 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const db = getDatabase();
   const today = format(new Date(), "yyyy-MM-dd");
+
+  if (isSupabaseActive()) {
+    try {
+      const supabase = createAdminClient();
+      const { data: inv, error: iErr } = await supabase
+        .from("invoices")
+        .select(`
+          *,
+          customer:customers(*),
+          subscription:subscriptions(number),
+          lines:invoice_lines(*),
+          payments:payments(*)
+        `)
+        .eq("id", id)
+        .single();
+
+      if (!iErr && inv) {
+        if (isCustomer(currentUser.role) && inv.customer?.user_id !== currentUser.id) {
+          return NextResponse.json({ error: "Forbidden: Not your invoice" }, { status: 403 });
+        }
+
+        const tot = Number(inv.total) || 0;
+        const paid = Number(inv.amount_paid) || 0;
+        const formatted = {
+          ...inv,
+          customer_name: inv.customer?.name,
+          customer_company: inv.customer?.company,
+          customer_email: inv.customer?.email,
+          customer_phone: inv.customer?.phone,
+          customer_address: inv.customer?.billing_address,
+          customer_tax_id: inv.customer?.tax_id,
+          subscription_number: inv.subscription?.number,
+          balance_due: tot - paid,
+          is_overdue: inv.status === "confirmed" && tot > paid && inv.due_date < today ? 1 : 0,
+        };
+
+        return NextResponse.json({
+          invoice: formatted,
+          lines: inv.lines || [],
+          payments: inv.payments || [],
+        });
+      }
+    } catch (err: any) {
+      console.warn("[Invoice Detail] Supabase fetch fallback:", err.message);
+    }
+  }
+
+  const db = getDatabase();
 
   const inv = db
     .prepare(

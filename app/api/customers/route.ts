@@ -3,6 +3,7 @@ import { getDatabase } from "@/lib/db/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isCustomer, isStaff } from "@/lib/auth/rbac";
 import { syncRecordToSupabase } from "@/lib/supabase/sync";
+import { fetchCustomers } from "@/lib/supabase/data";
 
 export async function GET() {
   const currentUser = await getCurrentUser();
@@ -10,24 +11,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const db = getDatabase();
-  let query = `
-    SELECT c.*, 
-           (SELECT count(*) FROM subscriptions WHERE customer_id = c.id AND status = 'active') as active_subs_count,
-           (SELECT count(*) FROM invoices WHERE customer_id = c.id) as total_invoices_count
-    FROM customers c
-    WHERE 1=1
-  `;
-  const params: any[] = [];
-
-  if (isCustomer(currentUser.role)) {
-    query += ` AND c.user_id = ?`;
-    params.push(currentUser.id);
-  }
-
-  query += ` ORDER BY c.name ASC`;
-  const customers = db.prepare(query).all(...params);
-
+  const customers = await fetchCustomers(isCustomer(currentUser.role) ? currentUser.id : undefined);
   return NextResponse.json({ customers });
 }
 

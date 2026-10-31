@@ -4,6 +4,7 @@ import { recordPayment } from "@/lib/db/billing-engine";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isCustomer, isStaff } from "@/lib/auth/rbac";
 import { syncRecordToSupabase } from "@/lib/supabase/sync";
+import { fetchPayments } from "@/lib/supabase/data";
 
 export async function GET(request: Request) {
   const currentUser = await getCurrentUser();
@@ -11,27 +12,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const db = getDatabase();
-  let query = `
-    SELECT p.*, 
-           i.number as invoice_number, i.total as invoice_total, i.status as invoice_status,
-           c.name as customer_name, c.company as customer_company
-    FROM payments p
-    JOIN invoices i ON p.invoice_id = i.id
-    JOIN customers c ON i.customer_id = c.id
-    WHERE 1=1
-  `;
-  const params: any[] = [];
-
-  // Customer isolation
-  if (isCustomer(currentUser.role)) {
-    query += ` AND c.user_id = ?`;
-    params.push(currentUser.id);
-  }
-
-  query += ` ORDER BY p.payment_date DESC, p.created_at DESC`;
-
-  const payments = db.prepare(query).all(...params);
+  const payments = await fetchPayments(isCustomer(currentUser.role) ? currentUser.id : undefined);
   return NextResponse.json({ payments });
 }
 
