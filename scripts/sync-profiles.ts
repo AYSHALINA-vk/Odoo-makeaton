@@ -50,6 +50,13 @@ async function syncProfiles() {
       console.error(`❌ Failed to sync profile ${p.email}:`, error.message);
     } else {
       console.log(`✅ Synced profile: [${p.role}] ${p.full_name} (${p.email})`);
+      // Also link customer user_id if this is a customer
+      if (p.role === "customer") {
+        await supabase
+          .from("customers")
+          .update({ user_id: uuid })
+          .eq("email", p.email.toLowerCase());
+      }
     }
   }
 }
