@@ -4,6 +4,9 @@ import { hashPassword } from "@/lib/db/seed";
 import { validatePassword } from "@/lib/auth/password-policy";
 import { setSessionCookie } from "@/lib/auth/session";
 import { syncRecordToSupabase } from "@/lib/supabase/sync";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { isSupabaseActive } from "@/lib/supabase/data";
+import crypto from "crypto";
 
 export async function POST(request: Request) {
   try {
@@ -44,16 +47,43 @@ export async function POST(request: Request) {
     const userId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const custId = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-    // 3. Insert customer profile (Sign-up only creates Customer accounts, never admin or staff)
+    // 3. Insert customer profile locally (Sign-up only creates Customer accounts, never admin or staff)
     db.prepare(
       `INSERT INTO profiles (id, email, password_hash, full_name, role)
        VALUES (?, ?, ?, ?, 'customer')`
     ).run(userId, cleanEmail, hashPassword(password), fullName.trim());
 
-    // 4. Create linked customer row
+    // 4. Sync profile to Supabase if active
+    let supabaseUserId: string | null = null;
+    if (isSupabaseActive()) {
+      try {
+        const hash = crypto.createHash("md5").update(cleanEmail).digest("hex");
+        const profileUuid = `${hash.substring(0, 8)}-${hash.substring(8, 12)}-4${hash.substring(13, 16)}-a${hash.substring(17, 20)}-${hash.substring(20, 32)}`;
+        const supabase = createAdminClient();
+        const { data: supaProfile } = await supabase
+          .from("profiles")
+          .upsert(
+            {
+              id: profileUuid,
+              email: cleanEmail,
+              full_name: fullName.trim(),
+              role: "customer",
+            },
+            { onConflict: "email" }
+          )
+          .select("id")
+          .maybeSingle();
+
+        supabaseUserId = supaProfile?.id || profileUuid;
+      } catch (err: any) {
+        console.warn("[Signup Sync] Failed to sync profile to Supabase:", err.message);
+      }
+    }
+
+    // 5. Create linked customer row
     const customerRow = {
       id: custId,
-      user_id: null, // NULL in Supabase unless linked to an auth.users UUID
+      user_id: supabaseUserId,
       name: fullName.trim(),
       company: company ? company.trim() : null,
       email: cleanEmail,
