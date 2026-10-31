@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     // Sync payment and updated invoice to Supabase
     try {
       const paymentRow = db.prepare(`SELECT * FROM payments WHERE id = ?`).get(result.paymentId);
-      const invoiceRow = db.prepare(`SELECT * FROM invoices WHERE id = ?`).get(invoiceId);
+      const invoiceRow = db.prepare(`SELECT * FROM invoices WHERE id = ? OR number = ?`).get(invoiceId, invoiceId);
       if (paymentRow) await syncRecordToSupabase("payments", paymentRow);
       if (invoiceRow) await syncRecordToSupabase("invoices", invoiceRow);
     } catch (err: any) {

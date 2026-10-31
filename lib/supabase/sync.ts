@@ -32,7 +32,16 @@ export async function syncRecordToSupabase(table: string, record: any) {
       return clean;
     });
 
-    const { error } = await supabase.from(table).upsert(cleaned, { onConflict: "id" });
+    const conflictCol =
+      table === "invoices"
+        ? "number"
+        : table === "subscriptions"
+        ? "number"
+        : table === "profiles"
+        ? "email"
+        : "id";
+
+    const { error } = await supabase.from(table).upsert(cleaned, { onConflict: conflictCol });
     if (error) {
       console.warn(`[Supabase Sync Warning] ${table}:`, error.message);
     }

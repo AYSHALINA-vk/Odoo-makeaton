@@ -26,9 +26,9 @@ export async function POST(
          FROM subscriptions s
          JOIN customers c ON s.customer_id = c.id
          JOIN plans p ON s.plan_id = p.id
-         WHERE s.id = ?`
+         WHERE s.id = ? OR s.number = ?`
       )
-      .get(id) as any;
+      .get(id, id) as any;
 
     if (!sub) {
       return NextResponse.json({ error: "Subscription not found" }, { status: 404 });
@@ -116,8 +116,8 @@ export async function POST(
     db.prepare(
       `UPDATE subscriptions 
        SET status = ?, expiry_date = ?, updated_at = datetime('now')
-       WHERE id = ?`
-    ).run(newStatus, newExpiryDate, id);
+       WHERE id = ? OR number = ?`
+    ).run(newStatus, newExpiryDate, sub.id, sub.number);
 
     // Sync to Supabase
     await syncRecordToSupabase("subscriptions", {
